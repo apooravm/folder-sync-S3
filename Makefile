@@ -1,7 +1,7 @@
 APP_NAME := folder_sync_s3.exe
 
 tidy:
-	@echo "Tidying up..."
+	@echo "tidying up..."
 	@go mod tidy
 	@go mod vendor
 
