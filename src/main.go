@@ -54,7 +54,7 @@ func handleCliArgs(cliArg string) {
 				return
 			}
 		} else {
-			fmt.Println("Config file does not exist")
+			fmt.Println("Config file not found.")
 		}
 	case "generate":
 		if configMng.CheckConfigFileExists(configPath) {
@@ -65,19 +65,26 @@ func handleCliArgs(cliArg string) {
 				log.Println("Error creating config file", err.Error())
 				return
 			}
-			fmt.Println("File created successfully. Please fill out the details.")
+			fmt.Println("File created successfully. Please fill out the details at " + configPath)
 		}
+
+	case "download":
+		cfg, err := configMng.ReadConfig(configPath)
+		if err != nil {
+			fmt.Println("Error reading config", err.Error())
+			return
+		}
+
+		S3Config = cfg
+
+		DownloadAndSaveFile()
 	}
 }
 
 func DownloadAndSaveFile() {
-	BUCKET_NAME := ""
-	objKey := ""
-	BUCKET_REGION := ""
-
-	file, err := DownloadFile(BUCKET_NAME, objKey, BUCKET_REGION)
+	file, err := DownloadFile(S3Config.Bucket_name, S3Config.Bucket_sync_folder+"info.json", S3Config.Bucket_region)
 	if err != nil {
-		log.Println("Error downloading file")
+		log.Println("Error downloading file", err.Error())
 		return
 	}
 
@@ -102,6 +109,9 @@ func DownloadFile(bucketName string, objPath string, region string) ([]byte, err
 
 	client := s3.NewFromConfig(cfg)
 
+	fmt.Println("BName", bucketName)
+	fmt.Println("ObPath", objPath)
+	fmt.Println("Region", region)
 	output, err := client.GetObject(context.TODO(), &s3.GetObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(objPath),

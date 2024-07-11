@@ -15,7 +15,11 @@
 *.out
 bin/
 
+<<<<<<< HEAD
 Dependency directories (remove the comment below to include it)
+=======
+# Dependency directories (remove the comment below to include it)
+>>>>>>> 9f077980307e018645b93580f0b6bad3aef123d6
 vendor/
 
 # Go workspace file
