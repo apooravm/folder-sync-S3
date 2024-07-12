@@ -9,18 +9,21 @@ import (
 	"path/filepath"
 
 	configMng "github.com/apooravm/folder-sync-S3/src/config"
+	"github.com/apooravm/folder-sync-S3/src/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	// "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 var (
-	S3Config      *configMng.S3_Config
+	s3Config      *configMng.S3_Config
 	configName    = "s3Config.json"
 	configPath    string
 	targetPath    string
 	LargeFileSize int64 = 100_1000_1000 // 100MB
+	client        *s3.Client
 )
 
 func main() {
@@ -33,27 +36,33 @@ func main() {
 	exeDir := filepath.Dir(exePath)
 	configPath = filepath.Join(exeDir, configName)
 
-	localCfg, err := configMng.ReadConfig(configPath)
+	s3Config, err = configMng.ReadConfig(configPath)
 	if err != nil {
 		log.Println("Error reading config.", err.Error())
 		return
 	}
 
-	if len(os.Args) > 1 {
-		err := handleCliArgs(localCfg)
-		if err != nil {
-			log.Println(err.Error())
-			return
-		}
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		utils.LogColourPrint("red", true, "Error loading config.", err.Error())
 		return
 	}
 
-	fmt.Println("Bro what do you want 🤨")
+	client = s3.NewFromConfig(cfg)
 
+	if len(os.Args) > 1 {
+		if err := handleCliArgs(); err != nil {
+			log.Println(err.Error())
+		}
+
+		return
+	}
+
+	utils.ColourPrint("Bro what do you want 🤨", "cyan")
 }
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/gov2/s3/actions/bucket_basics.go
-func ListObjects(localCfg *configMng.S3_Config) {
+func ListObjects() {
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		log.Println("Error loading default config")
@@ -63,7 +72,7 @@ func ListObjects(localCfg *configMng.S3_Config) {
 	client := s3.NewFromConfig(cfg)
 
 	res, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
-		Bucket: &localCfg.Bucket_name,
+		Bucket: &s3Config.Bucket_name,
 	})
 
 	if err != nil {
@@ -76,7 +85,7 @@ func ListObjects(localCfg *configMng.S3_Config) {
 	}
 }
 
-func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
+func UploadFile(targetToUpload string) error {
 	file, err := os.Open(targetToUpload)
 	if err != nil {
 		return err
@@ -84,16 +93,7 @@ func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
 
 	defer file.Close()
 
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		return fmt.Errorf("Error loading default config. %s", err.Error())
-	}
-
-	client := s3.NewFromConfig(cfg)
-
-	// TODO: Create object key from targetToUpload.
-	// Fornow default to a certain object folder
-
+	// Creating object key from filename
 	targetPathInfo, err := os.Stat(targetToUpload)
 	if err != nil {
 		log.Println(err.Error())
@@ -113,7 +113,7 @@ func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
 
 	// Key is the object key btw
 	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
-		Bucket: &localCfg.Bucket_name,
+		Bucket: &s3Config.Bucket_name,
 		Key:    &targetPathObjectKey,
 		Body:   file,
 	})
@@ -126,7 +126,27 @@ func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
 	return nil
 }
 
-func handleCliArgs(localCfg *configMng.S3_Config) error {
+func UploadLargeObject(targetToUpload string) error {
+	_, err := os.Open(targetToUpload)
+	if err != nil {
+		return fmt.Errorf("Error opening file. %s", err.Error())
+	}
+
+	var partMiBs int64 = 10
+	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+		u.PartSize = partMiBs * 1024 * 1024
+	})
+
+	uploader.Upload(context.TODO(), &s3.PutObjectInput{
+		Bucket: aws.String(s3Config.Bucket_name),
+		Key:    aws.String(objectKey),
+		Body:   largeBuffer,
+	})
+
+	return nil
+}
+
+func handleCliArgs() error {
 	cliCMD := os.Args[1]
 
 	switch cliCMD {
@@ -162,12 +182,12 @@ func handleCliArgs(localCfg *configMng.S3_Config) error {
 			return fmt.Errorf("Error reading config. %s", err.Error())
 		}
 
-		S3Config = cfg
+		s3Config = cfg
 
 		DownloadAndSaveFile()
 
 	case "list":
-		ListObjects(localCfg)
+		ListObjects()
 
 		// Uploads file not dir YET
 	case "upload":
@@ -181,7 +201,7 @@ func handleCliArgs(localCfg *configMng.S3_Config) error {
 			return fmt.Errorf("Error finding file. %s", err.Error())
 		}
 
-		if err = UploadFile(localCfg, fileToUpload); err != nil {
+		if err = UploadFile(fileToUpload); err != nil {
 			return fmt.Errorf("Error uploading. %s", err.Error())
 		}
 
@@ -193,7 +213,7 @@ func handleCliArgs(localCfg *configMng.S3_Config) error {
 }
 
 func DownloadAndSaveFile() {
-	file, err := DownloadFile(S3Config.Bucket_name, "public/notes/"+"info.json", S3Config.Bucket_region)
+	file, err := DownloadFile(s3Config.Bucket_name, "public/notes/"+"info.json", s3Config.Bucket_region)
 	if err != nil {
 		log.Println("Error downloading file", err.Error())
 		return
