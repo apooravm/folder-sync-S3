@@ -33,19 +33,22 @@ func main() {
 	exeDir := filepath.Dir(exePath)
 	configPath = filepath.Join(exeDir, configName)
 
-	if len(os.Args) > 1 {
-		handleCliArgs()
-		return
-	}
-
 	localCfg, err := configMng.ReadConfig(configPath)
 	if err != nil {
 		log.Println("Error reading config.", err.Error())
 	}
 
-	// ListObjects(localCfg)
+	if len(os.Args) > 1 {
+		err := handleCliArgs(localCfg)
+		if err != nil {
+			log.Println(err.Error())
+			return
+		}
+		return
+	}
 
-	UploadFile(localCfg, "")
+	fmt.Println("Bro what do you want 🤨")
+
 }
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/gov2/s3/actions/bucket_basics.go
@@ -72,8 +75,8 @@ func ListObjects(localCfg *configMng.S3_Config) {
 	}
 }
 
-func UploadFile(localCfg *configMng.S3_Config, filepath string) error {
-	file, err := os.Open(filepath)
+func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
+	file, err := os.Open(targetToUpload)
 	if err != nil {
 		return err
 	}
@@ -87,21 +90,30 @@ func UploadFile(localCfg *configMng.S3_Config, filepath string) error {
 
 	client := s3.NewFromConfig(cfg)
 
-	// TODO: Create object key from filepath.
+	// TODO: Create object key from targetToUpload.
 	// Fornow default to a certain object folder
 
-	string_parts := strings.Split(filepath, "/")
+	string_parts := strings.Split(targetToUpload, "\\")
 	fmt.Println(string_parts)
+
+	targetPathInfo, err := os.Stat(targetToUpload)
+	if err != nil {
+		log.Println(err.Error())
+	}
+
+	fmt.Println(targetPathInfo.Name())
+	fmt.Println(targetPathInfo.Size())
+	fmt.Println(targetPathInfo.IsDir())
 
 	return nil
 	// Key is the object key btw
 	res, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: &localCfg.Bucket_name,
-		Key:    &filepath,
+		Key:    &targetToUpload,
 		Body:   file,
 	})
 	if err != nil {
-		return fmt.Errorf("Error uploading file %s. %s", filepath, err.Error())
+		return fmt.Errorf("Error uploading file %s. %s", targetToUpload, err.Error())
 	}
 
 	fmt.Println(res.ResultMetadata)
@@ -109,7 +121,7 @@ func UploadFile(localCfg *configMng.S3_Config, filepath string) error {
 	return nil
 }
 
-func handleCliArgs() error {
+func handleCliArgs(localCfg *configMng.S3_Config) error {
 	cliCMD := os.Args[1]
 
 	switch cliCMD {
@@ -156,7 +168,17 @@ func handleCliArgs() error {
 		}
 
 		fileToUpload := os.Args[2]
+		fileToUpload, err := filepath.Abs(fileToUpload)
+		if err != nil {
+			return fmt.Errorf("Error finding file. %s", err.Error())
+		}
 
+		if err = UploadFile(localCfg, fileToUpload); err != nil {
+			return fmt.Errorf("Error uploading. %s", err.Error())
+		}
+
+	default:
+		fmt.Println("???")
 	}
 
 	return nil
