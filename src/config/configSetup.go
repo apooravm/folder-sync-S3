@@ -62,6 +62,19 @@ func ReadConfig(configPath string) (*S3_Config, error) {
 
 	defer file.Close()
 
+	// byteArr, err := io.ReadAll(file)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("Error with io.ReadAll %s", err.Error())
+	// }
+	//
+	// if err = json.Unmarshal(byteArr, &localConfig); err != nil {
+	// 	return nil, fmt.Errorf("error unmarshalling %s", err.Error())
+	// }
+	//
+	// fmt.Println(localConfig)
+	//
+	// return nil, nil
+
 	if err = json.NewDecoder(file).Decode(&localConfig); err != nil {
 		return nil, err
 	}

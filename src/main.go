@@ -7,7 +7,6 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"strings"
 
 	configMng "github.com/apooravm/folder-sync-S3/src/config"
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -17,10 +16,11 @@ import (
 )
 
 var (
-	S3Config   *configMng.S3_Config
-	configName = "s3Config.json"
-	configPath string
-	targetPath string
+	S3Config      *configMng.S3_Config
+	configName    = "s3Config.json"
+	configPath    string
+	targetPath    string
+	LargeFileSize int64 = 100_1000_1000 // 100MB
 )
 
 func main() {
@@ -36,6 +36,7 @@ func main() {
 	localCfg, err := configMng.ReadConfig(configPath)
 	if err != nil {
 		log.Println("Error reading config.", err.Error())
+		return
 	}
 
 	if len(os.Args) > 1 {
@@ -93,30 +94,34 @@ func UploadFile(localCfg *configMng.S3_Config, targetToUpload string) error {
 	// TODO: Create object key from targetToUpload.
 	// Fornow default to a certain object folder
 
-	string_parts := strings.Split(targetToUpload, "\\")
-	fmt.Println(string_parts)
-
 	targetPathInfo, err := os.Stat(targetToUpload)
 	if err != nil {
 		log.Println(err.Error())
 	}
 
-	fmt.Println(targetPathInfo.Name())
-	fmt.Println(targetPathInfo.Size())
-	fmt.Println(targetPathInfo.IsDir())
+	if targetPathInfo.IsDir() {
+		return fmt.Errorf("Target is not a file. Dir upload unavailable.")
+	}
 
-	return nil
+	if targetPathInfo.Size() >= LargeFileSize {
+		return fmt.Errorf("Placeholder error. Implement large file upload here.")
+	}
+
+	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
+
+	fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
+
 	// Key is the object key btw
-	res, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: &localCfg.Bucket_name,
-		Key:    &targetToUpload,
+		Key:    &targetPathObjectKey,
 		Body:   file,
 	})
 	if err != nil {
 		return fmt.Errorf("Error uploading file %s. %s", targetToUpload, err.Error())
 	}
 
-	fmt.Println(res.ResultMetadata)
+	fmt.Println("File uploaded successfully.")
 
 	return nil
 }
@@ -161,6 +166,9 @@ func handleCliArgs(localCfg *configMng.S3_Config) error {
 
 		DownloadAndSaveFile()
 
+	case "list":
+		ListObjects(localCfg)
+
 		// Uploads file not dir YET
 	case "upload":
 		if len(os.Args) < 3 {
@@ -185,7 +193,7 @@ func handleCliArgs(localCfg *configMng.S3_Config) error {
 }
 
 func DownloadAndSaveFile() {
-	file, err := DownloadFile(S3Config.Bucket_name, S3Config.Bucket_sync_folder+"info.json", S3Config.Bucket_region)
+	file, err := DownloadFile(S3Config.Bucket_name, "public/notes/"+"info.json", S3Config.Bucket_region)
 	if err != nil {
 		log.Println("Error downloading file", err.Error())
 		return
