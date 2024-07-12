@@ -87,7 +87,7 @@ func GetObjectKeys() (*[]string, error) {
 	return &objectKeySlice, nil
 }
 
-func UploadFile(targetToUpload string, targetObjectKey string) error {
+func UploadNormalFile(targetToUpload string, targetObjectKey string) error {
 	file, err := os.Open(targetToUpload)
 	if err != nil {
 		return err
@@ -127,6 +127,59 @@ func UploadLargeFile(targetToUpload string, targetObjectKey string) error {
 		Key:    &targetObjectKey,
 		Body:   file,
 	})
+
+	return nil
+}
+
+func UploadFile(fileToUpload string) error {
+	targetPathInfo, err := os.Stat(fileToUpload)
+	if err != nil {
+		return fmt.Errorf("Could not find target info. %s", err.Error())
+	}
+
+	if targetPathInfo.IsDir() {
+		return fmt.Errorf("Target is not a file. Dir upload unavailable.")
+	}
+
+	// Creating object key from filename
+	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
+
+	fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
+
+	// Depending on the size of file, choose the upload method
+	// Right now a large file is ~100MB
+	if targetPathInfo.Size() <= LargeFileSize {
+		if err = UploadNormalFile(fileToUpload, targetPathObjectKey); err != nil {
+			return fmt.Errorf("Could not upload. %s", err.Error())
+		}
+
+	} else {
+		if err = UploadLargeFile(fileToUpload, targetPathObjectKey); err != nil {
+			return fmt.Errorf("Could not upload. %s", err.Error())
+		}
+	}
+
+	return nil
+}
+
+func UploadDir(pathToUpload string) error {
+	var dirFilePaths []string
+	fmt.Println(filepath.Base(pathToUpload))
+	filepath.Walk(pathToUpload, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if !info.IsDir() {
+			dirFilePaths = append(dirFilePaths, path)
+		}
+
+		return nil
+	})
+
+	for _, path := range dirFilePaths {
+		fmt.Println(path)
+	}
 
 	return nil
 }
@@ -264,35 +317,20 @@ func handleCliArgs() error {
 			return fmt.Errorf("Error finding file. %s", err.Error())
 		}
 
-		targetPathInfo, err := os.Stat(fileToUpload)
-		if err != nil {
-			return fmt.Errorf("Could not find target info. %s", err.Error())
-		}
-
-		if targetPathInfo.IsDir() {
-			return fmt.Errorf("Target is not a file. Dir upload unavailable.")
-		}
-
-		// Creating object key from filename
-		targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
-
-		fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
-
-		// Depending on the size of file, choose the upload method
-		// Right now a large file is ~100MB
-		if targetPathInfo.Size() <= LargeFileSize {
-			if err = UploadFile(fileToUpload, targetPathObjectKey); err != nil {
-				return fmt.Errorf("Could not upload. %s", err.Error())
-			}
-
-		} else {
-			if err = UploadLargeFile(fileToUpload, targetPathObjectKey); err != nil {
-				return fmt.Errorf("Could not upload. %s", err.Error())
-			}
-		}
+		UploadFile(fileToUpload)
 
 		fmt.Println("File uploaded successfully.")
 		utils.ColourPrint("Uploaded successfully.", "green")
+
+	case "dir":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("No target path provided.")
+		}
+
+		dirPath := os.Args[2]
+		if err := UploadDir(dirPath); err != nil {
+			return err
+		}
 
 	default:
 		fmt.Println("???")
