@@ -12,7 +12,7 @@ import (
 	"github.com/apooravm/folder-sync-S3/src/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+	// "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	// "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -62,11 +62,10 @@ func main() {
 }
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/gov2/s3/actions/bucket_basics.go
-func ListObjects() {
+func GetObjectKeys() (*[]string, error) {
 	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
-		log.Println("Error loading default config")
-		return
+		return nil, fmt.Errorf("Error loading default config. %s", err.Error())
 	}
 
 	client := s3.NewFromConfig(cfg)
@@ -76,13 +75,15 @@ func ListObjects() {
 	})
 
 	if err != nil {
-		log.Println("Couldnt list objects", err.Error())
-		return
+		return nil, fmt.Errorf("Could not list objects. %s", err.Error())
 	}
 
+	var objectKeySlice []string
 	for _, item := range res.Contents {
-		fmt.Println(string(*item.Key))
+		objectKeySlice = append(objectKeySlice, string(*item.Key))
 	}
+
+	return &objectKeySlice, nil
 }
 
 func UploadFile(targetToUpload string) error {
@@ -121,27 +122,80 @@ func UploadFile(targetToUpload string) error {
 		return fmt.Errorf("Error uploading file %s. %s", targetToUpload, err.Error())
 	}
 
-	fmt.Println("File uploaded successfully.")
-
 	return nil
 }
 
-func UploadLargeObject(targetToUpload string) error {
-	_, err := os.Open(targetToUpload)
+// func UploadLargeObject(targetToUpload string) error {
+// 	_, err := os.Open(targetToUpload)
+// 	if err != nil {
+// 		return fmt.Errorf("Error opening file. %s", err.Error())
+// 	}
+//
+// 	// Creating object key from filename
+// 	targetPathInfo, err := os.Stat(targetToUpload)
+// 	if err != nil {
+// 		log.Println(err.Error())
+// 	}
+//
+// 	if targetPathInfo.IsDir() {
+// 		return fmt.Errorf("Target is not a file. Dir upload unavailable.")
+// 	}
+//
+// 	if targetPathInfo.Size() <= LargeFileSize {
+// 		return fmt.Errorf("Placeholder error. Uploading normally would be better.")
+// 	}
+//
+// 	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
+//
+// 	fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
+//
+// 	var partMiBs int64 = 10
+// 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+// 		u.PartSize = partMiBs * 1024 * 1024
+// 	})
+//
+// 	uploader.Upload(context.TODO(), &s3.PutObjectInput{
+// 		Bucket: &s3Config.Bucket_name,
+// 		Key:    &targetPathObjectKey,
+// 		Body:   largeBuffer,
+// 	})
+//
+// 	return nil
+// }
+
+func ObjectKeyExists(objectKeyToCheck string) (bool, error) {
+	objectKeySlice, err := GetObjectKeys()
 	if err != nil {
-		return fmt.Errorf("Error opening file. %s", err.Error())
+		return false, err
 	}
 
-	var partMiBs int64 = 10
-	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
-		u.PartSize = partMiBs * 1024 * 1024
+	for _, objKey := range *objectKeySlice {
+		if objectKeyToCheck == objKey {
+			return true, nil
+		}
+	}
+
+	return false, nil
+}
+
+func DeleteFile(objectKeyToDelete string) error {
+	exists, err := ObjectKeyExists(objectKeyToDelete)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		return fmt.Errorf("Object key does not exist in the bucket.")
+	}
+
+	_, err = client.DeleteObject(context.TODO(), &s3.DeleteObjectInput{
+		Bucket: &s3Config.Bucket_name,
+		Key:    &objectKeyToDelete,
 	})
 
-	uploader.Upload(context.TODO(), &s3.PutObjectInput{
-		Bucket: aws.String(s3Config.Bucket_name),
-		Key:    aws.String(objectKey),
-		Body:   largeBuffer,
-	})
+	if err != nil {
+		return fmt.Errorf("Error deleting object %s. %s", objectKeyToDelete, err.Error())
+	}
 
 	return nil
 }
@@ -153,28 +207,62 @@ func handleCliArgs() error {
 	case "help":
 		fmt.Println("Usage: `tjournal.exe [ARG]` if arg needed\n\nAvailable Args\nhelp   - Display help\ndelete - Delete user config.json")
 
-	case "delete":
-		if configMng.CheckConfigFileExists(configPath) {
-			if err := configMng.DeleteConfig(configPath); err != nil {
-				return fmt.Errorf("Error deleting config. %s", err.Error())
+	case "config":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("Yeah what about the config??")
+		}
 
+		config_cmd := os.Args[2]
+
+		switch config_cmd {
+		case "delete":
+			if configMng.CheckConfigFileExists(configPath) {
+				if err := configMng.DeleteConfig(configPath); err != nil {
+					return fmt.Errorf("Error deleting config. %s", err.Error())
+
+				} else {
+					fmt.Println("Deleted successfully!")
+				}
 			} else {
-				fmt.Println("Deleted successfully!")
+				return fmt.Errorf("Config file not found.")
 			}
+
+		case "generate":
+			if configMng.CheckConfigFileExists(configPath) {
+				return fmt.Errorf("A Config already exists at path. Try 'folderSync.exe delete' to delete it.")
+			} else {
+				if err := configMng.CreateConfigFile(configPath); err != nil {
+					return fmt.Errorf("creating config file. %s", err.Error())
+				}
+
+				fmt.Println("File created successfully. Please fill out the details at " + configPath)
+			}
+		}
+
+	case "delete":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("No target object key provided.")
+		}
+
+		objectKeyToDelete := os.Args[2]
+
+		var userConfirmRes string
+		fmt.Println("Are you sure about this? (y/n)")
+		fmt.Scan(&userConfirmRes)
+
+		if userConfirmRes == "y" || userConfirmRes == "yes" || userConfirmRes == "Yes" || userConfirmRes == "Y" {
+			fmt.Println(utils.LogColourSprintf(fmt.Sprintf("Deleting %s...", objectKeyToDelete), "yellow", false))
+			if err := DeleteFile(objectKeyToDelete); err != nil {
+				return fmt.Errorf("%s", err.Error())
+			}
+
+			utils.ColourPrint("Deleted successfully.", "green")
+
 		} else {
-			return fmt.Errorf("Config file not found.")
+			fmt.Println(utils.LogColourSprintf("Aborted", "red", false))
 		}
 
 	case "generate":
-		if configMng.CheckConfigFileExists(configPath) {
-			return fmt.Errorf("A Config already exists at path. Try 'folderSync.exe delete' to delete it.")
-		} else {
-			if err := configMng.CreateConfigFile(configPath); err != nil {
-				return fmt.Errorf("creating config file. %s", err.Error())
-			}
-
-			fmt.Println("File created successfully. Please fill out the details at " + configPath)
-		}
 
 	case "download":
 		cfg, err := configMng.ReadConfig(configPath)
@@ -187,7 +275,14 @@ func handleCliArgs() error {
 		DownloadAndSaveFile()
 
 	case "list":
-		ListObjects()
+		objSlice, err := GetObjectKeys()
+		if err != nil {
+			return err
+		}
+
+		for _, objKey := range *objSlice {
+			fmt.Println(objKey)
+		}
 
 		// Uploads file not dir YET
 	case "upload":
@@ -204,6 +299,8 @@ func handleCliArgs() error {
 		if err = UploadFile(fileToUpload); err != nil {
 			return fmt.Errorf("Error uploading. %s", err.Error())
 		}
+
+		utils.ColourPrint("Uploaded successfully.", "green")
 
 	default:
 		fmt.Println("???")
