@@ -12,7 +12,8 @@ import (
 	"github.com/apooravm/folder-sync-S3/src/utils"
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
-	// "github.com/aws/aws-sdk-go-v2/feature/s3/manager"
+
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	// "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -86,7 +87,7 @@ func GetObjectKeys() (*[]string, error) {
 	return &objectKeySlice, nil
 }
 
-func UploadFile(targetToUpload string) error {
+func UploadFile(targetToUpload string, targetObjectKey string) error {
 	file, err := os.Open(targetToUpload)
 	if err != nil {
 		return err
@@ -94,28 +95,10 @@ func UploadFile(targetToUpload string) error {
 
 	defer file.Close()
 
-	// Creating object key from filename
-	targetPathInfo, err := os.Stat(targetToUpload)
-	if err != nil {
-		log.Println(err.Error())
-	}
-
-	if targetPathInfo.IsDir() {
-		return fmt.Errorf("Target is not a file. Dir upload unavailable.")
-	}
-
-	if targetPathInfo.Size() >= LargeFileSize {
-		return fmt.Errorf("Placeholder error. Implement large file upload here.")
-	}
-
-	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
-
-	fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
-
 	// Key is the object key btw
 	_, err = client.PutObject(context.TODO(), &s3.PutObjectInput{
 		Bucket: &s3Config.Bucket_name,
-		Key:    &targetPathObjectKey,
+		Key:    &targetObjectKey,
 		Body:   file,
 	})
 	if err != nil {
@@ -125,43 +108,28 @@ func UploadFile(targetToUpload string) error {
 	return nil
 }
 
-// func UploadLargeObject(targetToUpload string) error {
-// 	_, err := os.Open(targetToUpload)
-// 	if err != nil {
-// 		return fmt.Errorf("Error opening file. %s", err.Error())
-// 	}
-//
-// 	// Creating object key from filename
-// 	targetPathInfo, err := os.Stat(targetToUpload)
-// 	if err != nil {
-// 		log.Println(err.Error())
-// 	}
-//
-// 	if targetPathInfo.IsDir() {
-// 		return fmt.Errorf("Target is not a file. Dir upload unavailable.")
-// 	}
-//
-// 	if targetPathInfo.Size() <= LargeFileSize {
-// 		return fmt.Errorf("Placeholder error. Uploading normally would be better.")
-// 	}
-//
-// 	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
-//
-// 	fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
-//
-// 	var partMiBs int64 = 10
-// 	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
-// 		u.PartSize = partMiBs * 1024 * 1024
-// 	})
-//
-// 	uploader.Upload(context.TODO(), &s3.PutObjectInput{
-// 		Bucket: &s3Config.Bucket_name,
-// 		Key:    &targetPathObjectKey,
-// 		Body:   largeBuffer,
-// 	})
-//
-// 	return nil
-// }
+func UploadLargeFile(targetToUpload string, targetObjectKey string) error {
+	file, err := os.Open(targetToUpload)
+	if err != nil {
+		return fmt.Errorf("Error opening file. %s", err.Error())
+	}
+
+	defer file.Close()
+
+	var partMiBs int64 = 10
+	uploader := manager.NewUploader(client, func(u *manager.Uploader) {
+		u.PartSize = partMiBs * 1024 * 1024
+		u.Concurrency = 5 // Default is 5
+	})
+
+	uploader.Upload(context.TODO(), &s3.PutObjectInput{
+		Bucket: &s3Config.Bucket_name,
+		Key:    &targetObjectKey,
+		Body:   file,
+	})
+
+	return nil
+}
 
 func ObjectKeyExists(objectKeyToCheck string) (bool, error) {
 	objectKeySlice, err := GetObjectKeys()
@@ -296,10 +264,34 @@ func handleCliArgs() error {
 			return fmt.Errorf("Error finding file. %s", err.Error())
 		}
 
-		if err = UploadFile(fileToUpload); err != nil {
-			return fmt.Errorf("Error uploading. %s", err.Error())
+		targetPathInfo, err := os.Stat(fileToUpload)
+		if err != nil {
+			return fmt.Errorf("Could not find target info. %s", err.Error())
 		}
 
+		if targetPathInfo.IsDir() {
+			return fmt.Errorf("Target is not a file. Dir upload unavailable.")
+		}
+
+		// Creating object key from filename
+		targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
+
+		fmt.Printf("Uploading file %s (%.2fMB) to %s\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)
+
+		// Depending on the size of file, choose the upload method
+		// Right now a large file is ~100MB
+		if targetPathInfo.Size() <= LargeFileSize {
+			if err = UploadFile(fileToUpload, targetPathObjectKey); err != nil {
+				return fmt.Errorf("Could not upload. %s", err.Error())
+			}
+
+		} else {
+			if err = UploadLargeFile(fileToUpload, targetPathObjectKey); err != nil {
+				return fmt.Errorf("Could not upload. %s", err.Error())
+			}
+		}
+
+		fmt.Println("File uploaded successfully.")
 		utils.ColourPrint("Uploaded successfully.", "green")
 
 	default:
