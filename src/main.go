@@ -13,12 +13,14 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	// "github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 var (
 	S3Config   *configMng.S3_Config
 	configName = "s3Config.json"
 	configPath string
+	targetPath string
 )
 
 func main() {
@@ -31,54 +33,133 @@ func main() {
 	exeDir := filepath.Dir(exePath)
 	configPath = filepath.Join(exeDir, configName)
 
-	cli_args := strings.Join(os.Args[1:], "")
-	if len(cli_args) != 0 {
-		handleCliArgs(cli_args)
+	if len(os.Args) > 1 {
+		handleCliArgs()
 		return
+	}
+
+	localCfg, err := configMng.ReadConfig(configPath)
+	if err != nil {
+		log.Println("Error reading config.", err.Error())
+	}
+
+	// ListObjects(localCfg)
+
+	UploadFile(localCfg, "")
+}
+
+// https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/gov2/s3/actions/bucket_basics.go
+func ListObjects(localCfg *configMng.S3_Config) {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		log.Println("Error loading default config")
+		return
+	}
+
+	client := s3.NewFromConfig(cfg)
+
+	res, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+		Bucket: &localCfg.Bucket_name,
+	})
+
+	if err != nil {
+		log.Println("Couldnt list objects", err.Error())
+		return
+	}
+
+	for _, item := range res.Contents {
+		fmt.Println(string(*item.Key))
 	}
 }
 
-func handleCliArgs(cliArg string) {
-	switch cliArg {
+func UploadFile(localCfg *configMng.S3_Config, filepath string) error {
+	file, err := os.Open(filepath)
+	if err != nil {
+		return err
+	}
+
+	defer file.Close()
+
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		return fmt.Errorf("Error loading default config. %s", err.Error())
+	}
+
+	client := s3.NewFromConfig(cfg)
+
+	// TODO: Create object key from filepath.
+	// Fornow default to a certain object folder
+
+	string_parts := strings.Split(filepath, "/")
+	fmt.Println(string_parts)
+
+	return nil
+	// Key is the object key btw
+	res, err := client.PutObject(context.TODO(), &s3.PutObjectInput{
+		Bucket: &localCfg.Bucket_name,
+		Key:    &filepath,
+		Body:   file,
+	})
+	if err != nil {
+		return fmt.Errorf("Error uploading file %s. %s", filepath, err.Error())
+	}
+
+	fmt.Println(res.ResultMetadata)
+
+	return nil
+}
+
+func handleCliArgs() error {
+	cliCMD := os.Args[1]
+
+	switch cliCMD {
 	case "help":
 		fmt.Println("Usage: `tjournal.exe [ARG]` if arg needed\n\nAvailable Args\nhelp   - Display help\ndelete - Delete user config.json")
 
 	case "delete":
 		if configMng.CheckConfigFileExists(configPath) {
 			if err := configMng.DeleteConfig(configPath); err != nil {
-				fmt.Println("Error deleting config")
-				return
+				return fmt.Errorf("Error deleting config. %s", err.Error())
 
 			} else {
 				fmt.Println("Deleted successfully!")
-				return
 			}
 		} else {
-			fmt.Println("Config file not found.")
+			return fmt.Errorf("Config file not found.")
 		}
+
 	case "generate":
 		if configMng.CheckConfigFileExists(configPath) {
-			fmt.Println("A Config already exists at path. Try 'folderSync.exe delete' to delete it.")
-			return
+			return fmt.Errorf("A Config already exists at path. Try 'folderSync.exe delete' to delete it.")
 		} else {
 			if err := configMng.CreateConfigFile(configPath); err != nil {
-				log.Println("Error creating config file", err.Error())
-				return
+				return fmt.Errorf("creating config file. %s", err.Error())
 			}
+
 			fmt.Println("File created successfully. Please fill out the details at " + configPath)
 		}
 
 	case "download":
 		cfg, err := configMng.ReadConfig(configPath)
 		if err != nil {
-			fmt.Println("Error reading config", err.Error())
-			return
+			return fmt.Errorf("Error reading config. %s", err.Error())
 		}
 
 		S3Config = cfg
 
 		DownloadAndSaveFile()
+
+		// Uploads file not dir YET
+	case "upload":
+		if len(os.Args) < 3 {
+			return fmt.Errorf("No target path provided.")
+		}
+
+		fileToUpload := os.Args[2]
+
 	}
+
+	return nil
 }
 
 func DownloadAndSaveFile() {
