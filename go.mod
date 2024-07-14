@@ -3,13 +3,13 @@ module github.com/apooravm/folder-sync-S3
 go 1.21.3
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.30.3
 	github.com/aws/aws-sdk-go-v2/config v1.27.26
 	github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.17.7
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.58.2
 )
 
 require (
+	github.com/aws/aws-sdk-go-v2 v1.30.3 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.6.3 // indirect
 	github.com/aws/aws-sdk-go-v2/credentials v1.17.26 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.16.11 // indirect
