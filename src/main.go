@@ -26,31 +26,9 @@ var (
 )
 
 func main() {
-	exePath, err := os.Executable()
-	if err != nil {
-		log.Println("Error locating the exec file")
-		return
+	if err := CheckAndCreateConfig(); err != nil {
+		fmt.Println(err.Error())
 	}
-
-	exeDir := filepath.Dir(exePath)
-	configPath = filepath.Join(exeDir, configName)
-
-	s3Config, err = configMng.ReadConfig(configPath)
-	if err != nil {
-		log.Println("Error reading config.", err.Error())
-		return
-	}
-
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		utils.LogColourPrint("red", true, "Error loading config.", err.Error())
-		return
-	}
-
-	client := s3.NewFromConfig(cfg)
-
-	s3Sync.Client = client
-	s3Sync.S3Config = s3Config
 
 	if len(os.Args) > 1 {
 		if err := HandleCliArgs(); err != nil {
@@ -59,8 +37,78 @@ func main() {
 
 		return
 	}
+}
 
-	utils.ColourPrint("Bro what do you want 🤨", "cyan")
+func ReadConfig() error {
+	var err error
+	s3Config, err = configMng.ReadConfig(configPath)
+	if err != nil {
+		return fmt.Errorf("Could not read the foldersync config. If the file does not exist, try %s", err.Error())
+	}
+
+	return nil
+}
+
+// Bucket client setup
+func BucketClientSetup() error {
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		utils.LogColourPrint("red", true, "Error loading config.", err.Error())
+		return fmt.Errorf("Could not load the config. %s", err.Error())
+	}
+
+	client := s3.NewFromConfig(cfg)
+
+	s3Sync.Client = client
+	s3Sync.S3Config = s3Config
+
+	return nil
+}
+
+func PrintHelp() {
+	fmt.Println("App usage: 'folder-sync-s3.exe [COMMAND] [CMD_ARG] | {SUB_CMD}'")
+
+	fmt.Println("\nCommands -")
+	fmt.Println("help - Display this helper text. 'tshare-client.exe help")
+	fmt.Println("config - Manage local config.json file. 'folder-sync-s3.exe config [SUB_CMD]'")
+	fmt.Println("      delete - Delete config file.")
+	fmt.Println("      generate - Create a new config file.")
+
+	fmt.Println("\nSubcommands - Attach these at the end")
+	fmt.Println("Set a custom chunk size. '-chunk=<CHUNK_SIZE>'")
+	fmt.Println("Set a custom client name. '-name=<NAME>'")
+	fmt.Println("Set to dev mode. '-mode=dev'")
+}
+
+func CheckAndCreateConfig() error {
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("Could not locate the foldersync exec file. %s", err.Error())
+	}
+
+	exeDir := filepath.Dir(exePath)
+	configPath = filepath.Join(exeDir, configName)
+
+	if !configMng.CheckConfigFileExists(configPath) {
+		if err := configMng.CreateConfigFile(configPath); err != nil {
+			return fmt.Errorf("creating config file. %s", err.Error())
+		}
+
+		fmt.Println("A config file has been generated. Please fill out the details at", configPath)
+		return nil
+
+	} else {
+		if err := ReadConfig(); err != nil {
+			return err
+		}
+
+		if s3Config.Bucket_name == "" || s3Config.Bucket_region == "" {
+			fmt.Println("Details missing in config file. Fill them out at", configPath)
+			return nil
+		}
+	}
+
+	return nil
 }
 
 func HandleCliArgs() error {
@@ -68,7 +116,7 @@ func HandleCliArgs() error {
 
 	switch cliCMD {
 	case "help":
-		fmt.Println("Usage: `tjournal.exe [ARG]` if arg needed\n\nAvailable Args\nhelp   - Display help\ndelete - Delete user config.json")
+		PrintHelp()
 
 	case "config":
 		if len(os.Args) < 3 {
@@ -102,9 +150,30 @@ func HandleCliArgs() error {
 			}
 		}
 
+	default:
+		// Create config file if not exist
+		if err := BucketClientSetup(); err != nil {
+			return err
+		}
+
+		fmt.Println(s3Config)
+
+		if err := S3CRUDArgs(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func S3CRUDArgs() error {
+	switch os.Args[1] {
 	case "delete":
 		if len(os.Args) < 3 {
 			return fmt.Errorf("No target object key provided.")
+		}
+
+		if err := BucketClientSetup(); err != nil {
 		}
 
 		objectKeyToDelete := os.Args[2]
@@ -124,8 +193,6 @@ func HandleCliArgs() error {
 		} else {
 			fmt.Println(utils.LogColourSprintf("Aborted", "red", false))
 		}
-
-	case "generate":
 
 	case "download":
 		if err := os.MkdirAll("./downloads", os.ModePerm); err != nil {

@@ -5,20 +5,12 @@ import (
 	"fmt"
 	"path/filepath"
 
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
 // https://github.com/awsdocs/aws-doc-sdk-examples/blob/main/gov2/s3/actions/bucket_basics.go
 func GetObjectKeys() (*[]FileInfo, error) {
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		return nil, fmt.Errorf("Error loading default config. %s", err.Error())
-	}
-
-	client := s3.NewFromConfig(cfg)
-
-	res, err := client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+	res, err := Client.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
 		Bucket: &S3Config.Bucket_name,
 	})
 
