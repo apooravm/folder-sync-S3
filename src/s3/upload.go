@@ -57,7 +57,7 @@ func UploadLargeFile(targetToUpload string, targetObjectKey string) error {
 	return nil
 }
 
-func UploadFile(fileToUpload string) error {
+func UploadFile(fileToUpload, fileTargetObjectPath string) error {
 	targetPathInfo, err := os.Stat(fileToUpload)
 	if err != nil {
 		return fmt.Errorf("Could not find target info. %s", err.Error())
@@ -82,6 +82,9 @@ func UploadFile(fileToUpload string) error {
 
 	// Creating object key from filename
 	targetPathObjectKey := "public/folder_sync/" + targetPathInfo.Name()
+	if fileTargetObjectPath != "" {
+		targetPathObjectKey = fileTargetObjectPath
+	}
 
 	var userConfirmRes string
 	fmt.Printf("Uploading file %s (%.2fMB) to %s\nContinue? (y/n)\n", targetPathInfo.Name(), float64(targetPathInfo.Size())/float64(1000_000), targetPathObjectKey)

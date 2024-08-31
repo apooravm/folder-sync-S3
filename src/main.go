@@ -156,8 +156,6 @@ func HandleCliArgs() error {
 			return err
 		}
 
-		fmt.Println(s3Config)
-
 		if err := S3CRUDArgs(); err != nil {
 			return err
 		}
@@ -230,7 +228,13 @@ func S3CRUDArgs() error {
 			return fmt.Errorf("Error finding file. %s", err.Error())
 		}
 
-		if err := s3Sync.UploadFile(targetToUpload); err != nil {
+		// If target object path provided, upload to that
+		var targetObjectPath string = ""
+		if len(os.Args) > 3 {
+			targetObjectPath = os.Args[3]
+		}
+
+		if err := s3Sync.UploadFile(targetToUpload, targetObjectPath); err != nil {
 			return err
 		}
 
